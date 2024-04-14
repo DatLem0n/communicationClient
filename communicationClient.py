@@ -17,6 +17,7 @@ a functioning TCP part of the course work with little hassle.
 
 '''
 BUF_LEN = 2048
+enc_keys = []
 
 def send_and_receive_tcp(address, port, message):
     print("You gave arguments: {} {} {}".format(address, port, message))
@@ -32,15 +33,26 @@ def send_and_receive_tcp(address, port, message):
     rxBuf = soc.recv(BUF_LEN)
     # data you received is in bytes format. turn it to string with .decode() command
     rx_decoded = rxBuf.decode()
+    # Get your CID and UDP port from the message
+    rec_message, CID, port = rx_decoded.split(' ')
     # print received data
-    print(rx_decoded)
+    print(rec_message)
+
+    #getKeys(soc)
+
     # close the socket
     soc.close()
-    # Get your CID and UDP port from the message
-    rec_message, CID, UDP = rx_decoded.split(' ')
     # Continue to UDP messaging. You might want to give the function some other parameters like the above mentioned cid and port.
-    send_and_receive_udp(address, UDP, CID)
+    send_and_receive_udp(address, port, CID)
     return
+
+
+def getKeys(soc):
+    for i in range(0, 19):
+        rxBuf = soc.recv(BUF_LEN)
+        rx_decoded = rxBuf.decode()
+        print(rx_decoded)
+        enc_keys.append(rx_decoded)
 
 
 def send_and_receive_udp(address, port, CID):
@@ -63,11 +75,11 @@ def send_and_receive_udp(address, port, CID):
         print(rxMessage)
         message = reverseWords(rxMessage)
         sendUDP(ACK, CID, EOM, REMAIN, message, address, port, soc)
-
     return
 
 
 def sendUDP(ACK, CID, EOM, REMAIN, message, address, port, soc):
+
     message = message.encode()
     CID = str.encode(CID)
     port = int(port)
