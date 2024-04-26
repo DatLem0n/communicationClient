@@ -1,5 +1,8 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
+import math
+import os
+import secrets
 import struct
 # The modules required
 import sys
@@ -17,7 +20,14 @@ a functioning TCP part of the course work with little hassle.
 
 '''
 BUF_LEN = 2048
+KEY_AMOUNT = 20
+MSG_LEN = 64
 enc_keys = []
+dec_keys = []
+enc_keyNum = 0
+dec_keyNum = 0
+
+
 
 def send_and_receive_tcp(address, port, message):
     print("You gave arguments: {} {} {}".format(address, port, message))
@@ -34,11 +44,12 @@ def send_and_receive_tcp(address, port, message):
     # data you received is in bytes format. turn it to string with .decode() command
     rx_decoded = rxBuf.decode()
     # Get your CID and UDP port from the message
-    rec_message, CID, port = rx_decoded.split(' ')
+    rec_message, CID, rest = rx_decoded.split(' ')
+    port, keys = rest.split("\r\n", 1)
     # print received data
     print(rec_message)
 
-    #getKeys(soc)
+    get_dec_keys(rx_decoded, KEY_AMOUNT)
 
     # close the socket
     soc.close()
@@ -46,13 +57,39 @@ def send_and_receive_tcp(address, port, message):
     send_and_receive_udp(address, port, CID)
     return
 
+def encrypt(message):
+    new = ""
+    global enc_keyNum
+    if (enc_keyNum < KEY_AMOUNT):
+        key = enc_keys[enc_keyNum]
+        for i in range(len(message)):
+            new += chr((ord(message[i]) ^ ord(key[i])))
+        enc_keyNum += 1
+    else:
+        new = message
+    return new
 
-def getKeys(soc):
-    for i in range(0, 19):
-        rxBuf = soc.recv(BUF_LEN)
-        rx_decoded = rxBuf.decode()
-        print(rx_decoded)
-        enc_keys.append(rx_decoded)
+def decrypt(message):
+    new = ""
+    global dec_keyNum
+    if (dec_keyNum < KEY_AMOUNT):
+        key = dec_keys[dec_keyNum]
+        for i in range(len(message)):
+            new += chr((ord(message[i]) ^ ord(key[i])))
+        dec_keyNum += 1
+    else:
+        new = message
+    return new
+
+
+def get_dec_keys(message, keyAmount):
+    global dec_keys
+    dec_keys= message.split("\r\n")[1:keyAmount + 1]
+
+
+def gen_enc_keys(keyAmount):
+    for i in range(0, keyAmount):
+        enc_keys.append(secrets.token_hex(32))
 
 
 def send_and_receive_udp(address, port, CID):
@@ -64,27 +101,58 @@ def send_and_receive_udp(address, port, CID):
     REMAIN = 0
     soc = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     message = "Hello from {}".format(CID)
-
     sendUDP(ACK, CID, EOM, REMAIN, message, address, port, soc)
 
     while not EOM:
-        rxBuf = soc.recv(BUF_LEN)
-        CID, ACK, EOM, REMAIN, rxLen, message = struct.unpack("!8s??HH128s", rxBuf)
-        CID = CID.decode()
-        rxMessage = message[:rxLen].decode()
+        ACK, CID, EOM, REMAIN, rxMessage = receiveUDP(ACK, EOM, REMAIN, soc)
         print(rxMessage)
-        message = reverseWords(rxMessage)
-        sendUDP(ACK, CID, EOM, REMAIN, message, address, port, soc)
+        if not EOM:
+            message = reverseWords(rxMessage)
+            sendUDP(ACK, CID, EOM, REMAIN, message, address, port, soc)
     return
 
 
-def sendUDP(ACK, CID, EOM, REMAIN, message, address, port, soc):
+def receiveUDP(ACK, EOM, REMAIN, soc):
+    whole_message = ""
+    while 1:
+        rxBuf = soc.recv(BUF_LEN)
+        CID, ACK, EOM, REMAIN, rxLen, message = struct.unpack("!8s??HH128s", rxBuf)
+        message = message[:rxLen].decode()
+        if not EOM:
+            message = decrypt(message)
 
-    message = message.encode()
+        whole_message += message
+        if REMAIN == 0:
+            break
+    CID = CID.decode()
+    return ACK, CID, EOM, REMAIN, whole_message
+
+
+def sendUDP(ACK, CID, EOM, REMAIN, message, address, port, soc):
+    print(message)
+    messages = splitMessage(message)
     CID = str.encode(CID)
     port = int(port)
-    data = struct.pack("!8s??HH128s", CID, ACK, EOM, REMAIN, len(message), message)
-    soc.sendto(data, (address, port))
+    REMAIN = len(message)
+    for i in range(len(messages)):
+        message = messages[i]
+        message = encrypt(message)
+        message = message.encode()
+        REMAIN -= len(message)
+        data = struct.pack("!8s??HH128s", CID, ACK, EOM, REMAIN, len(message), message)
+        soc.sendto(data, (address, port))
+
+def splitMessage(message):
+    messages = []
+    if len(message) > MSG_LEN:
+        pieceAmount = math.ceil(len(message) / MSG_LEN)
+        for i in range(1, pieceAmount + 1):
+            piece = message[(i-1) * MSG_LEN:i*MSG_LEN]
+            messages.append(piece)
+    else:
+        messages.append(message)
+
+    return messages
 
 
 def reverseWords(string):
@@ -97,7 +165,6 @@ def reverseWords(string):
 
 def main():
     USAGE = 'usage: %s <server address> <server port> <message>' % sys.argv[0]
-
     try:
         # Get the server address, port and message from command line arguments
 
@@ -106,7 +173,11 @@ def main():
         # message = str(sys.argv[3])
         server_address = "195.148.20.105"
         server_tcpport = 10000
-        message = "HELLO\r\n"
+        message = "HELLO ENC MUL\r\n"
+        gen_enc_keys(KEY_AMOUNT)
+        for i in range(0,KEY_AMOUNT):
+            message = message + f"{enc_keys[i]}\r\n"
+        message = message + ".\r\n"
     except IndexError:
         print("Index Error")
     except ValueError:
