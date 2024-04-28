@@ -37,7 +37,7 @@ def send_and_receive_tcp(address: str, port: int, message: str) -> None:
     :param message: initial message to the server
     """
     try:
-        print("You gave arguments: {} {} {}".format(address, port, message))
+        print(f"Connecting to {address}:{port}")
         soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         soc.settimeout(3)
         soc.connect((address, port))
@@ -46,6 +46,9 @@ def send_and_receive_tcp(address: str, port: int, message: str) -> None:
 
         rxBuf = soc.recv(BUF_LEN)
         rx_decoded = rxBuf.decode()
+        if rx_decoded == "Not enough keys.\r\n":
+            raise ValueError
+        print(f"sending message: {message}")
         rec_message, CID, rest = rx_decoded.split(' ')
         port, keys = rest.split("\r\n", 1)
         print(rec_message)
@@ -55,8 +58,11 @@ def send_and_receive_tcp(address: str, port: int, message: str) -> None:
 
         send_and_receive_udp(address, port, CID)
         return
-    except TimeoutError:
+    except (TimeoutError, socket.gaierror):
         print("could not connect to TCP server")
+        sys.exit(USAGE)
+    except ValueError:
+        print("Incorrect message format")
         sys.exit(USAGE)
 
 
@@ -291,17 +297,19 @@ def main():
 
     try:
         # Get the server address, port and message from command line arguments
+        if len(sys.argv) > 1:
+            server_address = str(sys.argv[1])
+            server_tcp_port = int(sys.argv[2])
+            message = str(sys.argv[3]).encode('utf-8').decode('unicode_escape')
+        else:
+            print("No arguments given, starting with defaults")
+
         gen_enc_keys(KEY_AMOUNT)
         for i in range(0, KEY_AMOUNT):
             message = message + f"{enc_keys[i]}\r\n"
         message = message + ".\r\n"
 
-        server_address = str(sys.argv[1])
-        server_tcp_port = int(sys.argv[2])
-        message = str(sys.argv[3])
-    except IndexError:
-        print("No arguments given, starting with defaults")
-    except ValueError:
+    except (ValueError, IndexError):
         print("Incorrect arguments, please read the usage")
         sys.exit(USAGE)
 
