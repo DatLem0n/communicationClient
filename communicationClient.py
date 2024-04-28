@@ -28,7 +28,6 @@ enc_keyNum = 0
 dec_keyNum = 0
 
 
-
 def send_and_receive_tcp(address, port, message):
     print("You gave arguments: {} {} {}".format(address, port, message))
     # create TCP socket
@@ -57,6 +56,7 @@ def send_and_receive_tcp(address, port, message):
     send_and_receive_udp(address, port, CID)
     return
 
+
 def encrypt(message):
     new = ""
     global enc_keyNum
@@ -68,6 +68,7 @@ def encrypt(message):
     else:
         new = message
     return new
+
 
 def decrypt(message):
     new = ""
@@ -84,7 +85,7 @@ def decrypt(message):
 
 def get_dec_keys(message, keyAmount):
     global dec_keys
-    dec_keys= message.split("\r\n")[1:keyAmount + 1]
+    dec_keys = message.split("\r\n")[1:keyAmount + 1]
 
 
 def gen_enc_keys(keyAmount):
@@ -107,8 +108,13 @@ def send_and_receive_udp(address, port, CID):
         ACK, CID, EOM, REMAIN, rxMessage = receiveUDP(ACK, EOM, REMAIN, soc)
         print(rxMessage)
         if not EOM:
-            message = reverseWords(rxMessage)
-            sendUDP(ACK, CID, EOM, REMAIN, message, address, port, soc)
+            if not ACK:
+                message = "Send again"
+                sendUDP(ACK, CID, EOM, REMAIN, message, address, port, soc)
+            else:
+                message = reverseWords(rxMessage)
+                sendUDP(ACK, CID, EOM, REMAIN, message, address, port, soc)
+
     return
 
 
@@ -117,14 +123,20 @@ def receiveUDP(ACK, EOM, REMAIN, soc):
     while 1:
         rxBuf = soc.recv(BUF_LEN)
         CID, ACK, EOM, REMAIN, rxLen, message = struct.unpack("!8s??HH128s", rxBuf)
-        message = message[:rxLen].decode()
+        message = message.decode()
         if not EOM:
+            if not checkParity(message):
+                ACK = False
+            message = removeParity(message)
+            message = message[:rxLen]
             message = decrypt(message)
-
+        else:
+            message = message[:rxLen]
         whole_message += message
         if REMAIN == 0:
             break
     CID = CID.decode()
+
     return ACK, CID, EOM, REMAIN, whole_message
 
 
@@ -137,17 +149,20 @@ def sendUDP(ACK, CID, EOM, REMAIN, message, address, port, soc):
     for i in range(len(messages)):
         message = messages[i]
         message = encrypt(message)
+        origLen = len(message)
+        message = addParity(message)
         message = message.encode()
-        REMAIN -= len(message)
-        data = struct.pack("!8s??HH128s", CID, ACK, EOM, REMAIN, len(message), message)
+        REMAIN -= origLen
+        data = struct.pack("!8s??HH128s", CID, ACK, EOM, REMAIN, origLen, message)
         soc.sendto(data, (address, port))
+
 
 def splitMessage(message):
     messages = []
     if len(message) > MSG_LEN:
         pieceAmount = math.ceil(len(message) / MSG_LEN)
         for i in range(1, pieceAmount + 1):
-            piece = message[(i-1) * MSG_LEN:i*MSG_LEN]
+            piece = message[(i - 1) * MSG_LEN:i * MSG_LEN]
             messages.append(piece)
     else:
         messages.append(message)
@@ -163,6 +178,36 @@ def reverseWords(string):
     return " ".join(ret)
 
 
+def addParity(message):
+    parityMsg = ""
+    for char in message:
+        binChar = bin(ord(char))[2:]
+        ones = binChar.count('1')
+        binChar = int(binChar, 2)
+        binChar = binChar << 1
+        if ones % 2 != 0:
+            binChar += 1
+        parityMsg += chr(binChar)
+    return parityMsg
+
+
+def checkParity(message):
+    for char in message:
+        binChar = bin(ord(char))[2:]
+        ones = binChar.count('1')
+        if ones % 2 != 0:
+            return False
+    return True
+
+def removeParity(message):
+    cleanMessage = ""
+    for char in message:
+        bin_char = bin(ord(char))[2:]
+        bin_char = int(bin_char, 2)
+        bin_char = bin_char >> 1
+        cleanMessage += chr(bin_char)
+    return cleanMessage
+
 def main():
     USAGE = 'usage: %s <server address> <server port> <message>' % sys.argv[0]
     try:
@@ -173,9 +218,9 @@ def main():
         # message = str(sys.argv[3])
         server_address = "195.148.20.105"
         server_tcpport = 10000
-        message = "HELLO ENC MUL\r\n"
+        message = "HELLO ENC MUL PAR\r\n"
         gen_enc_keys(KEY_AMOUNT)
-        for i in range(0,KEY_AMOUNT):
+        for i in range(0, KEY_AMOUNT):
             message = message + f"{enc_keys[i]}\r\n"
         message = message + ".\r\n"
     except IndexError:
